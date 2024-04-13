@@ -21,7 +21,9 @@ class eca_block(nn.Module):
         
         avg = self.avg_pool(x).view([b, 1, c])
         out = self.conv(avg)
+        print(out.shape)
         out = self.sigmoid(out).view([b, c, 1, 1])
+        print(out.shape)
         
         return out * x
     

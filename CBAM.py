@@ -40,7 +40,7 @@ class spacial_attention(nn.Module):
         self.sigmoid = nn.Sigmoid()
 
     def forward(self, x):
-        b, c, w, h = x.size()
+        b, c, h, w = x.size()
         max_pool_out, _ = torch.max(x, dim=1, keepdim=True)
         mean_pool_out = torch.mean(x, dim=1, keepdim=True)
         pool_out = torch.cat([max_pool_out,mean_pool_out], dim=1)
