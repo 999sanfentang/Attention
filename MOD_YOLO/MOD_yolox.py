@@ -108,42 +108,84 @@ class DAF_CA(nn.Module):
         x_ha = pool_ha(x)
         x_hm = pool_hm(x)
         x_h = torch.cat([x_ha, x_hm], dim=3)
-
+        
         pool_wa = nn.AdaptiveAvgPool2d((1, w))
         pool_wm = nn.AdaptiveMaxPool2d((1, w))
         x_wa = pool_wa(x).permute(0, 1, 3, 2)
         x_wm = pool_wm(x).permute(0, 1, 3, 2)
         x_w = torch.cat([x_wa, x_wm], dim=3)
-
-        print(x_h.shape)
-        print(x_w.shape)
+        
         y1 = torch.cat([x_h, x_w], dim=2)
-        print(y1.shape)
         y1 = self.conv1(y1)
-        print(y1.shape)
         y1 = self.bn1(y1)
         y1 = self.act(y1)
-        print(y1.shape)
         
         y_h, y_w = torch.split(y1, [h,  w], dim=2)
         y_w = y_w.permute(0, 1, 3, 2)
         a_h = (self.conv_h(y_h)).sigmoid()
         a_w = (self.conv_w(y_w)).sigmoid()
-        
-        print(a_h.shape)
 
         return identity * a_h * a_w
 
 
-# Define your parameters
-inp = 32  # the number of input channels
-oup = 32  # the number of output channels
-reduction = 16  # reduction factor for mip calculation
+class MODSLayer(nn.Module):
+    def __init__(self, in_channels, out_channels, n=1, act="silu"):
+        super().__init__()
+        self.s = BaseConv(in_channels, out_channels,
+                          ksize=1, stride=1, act=act)
+        self.conv3 = DAF_CA(out_channels, out_channels, reduction=32)
+        module_list = [MODSConv(in_channels, in_channels, ksize=3)
+                       for _ in range(n)]
+        self.m = nn.Sequential(*module_list)
 
-# Create instance of DAF_CA
-daf_ca_instance = DAF_CA(inp, oup, reduction)
+    def forward(self, x):
+        x_1 = self.m(x)
+        x = x + x_1
+        return self.conv3(self.s(x))
 
-print(daf_ca_instance)
-inputs = torch.ones([2, 32, 26, 26])
-outputs = daf_ca_instance(inputs)
-# Now you can use daf_ca_instance to process your inputs
+
+class MODL_Head(nn.Module):
+    def __init__(self, num_classes, width=1.0, in_channels=[256, 512, 1024], act="silu"):
+        super().__init__()
+        self.cls_convs = nn.ModuleList()
+        self.reg_convs = nn.ModuleList()
+        self.cls_preds = nn.ModuleList()
+        self.reg_preds = nn.ModuleList()
+        self.obj_preds = nn.ModuleList()
+        self.stems = nn.ModuleList()
+
+        for i in range(len(in_channels)):
+            self.cls_convs.append(nn.Sequential(*[
+                MODSConv(in_channels=int(in_channels[i] * width), out_channels=int(
+                    in_channels[i] * width), ksize=3, stride=1, act=act),
+            ]))
+            self.cls_preds.append(
+                nn.Conv2d(in_channels=int(
+                    in_channels[i] * width), out_channels=num_classes, kernel_size=1, stride=1, padding=0)
+            )
+
+            self.reg_convs.append(nn.Sequential(*[
+                MODSConv(in_channels=int(in_channels[i] * width), out_channels=int(
+                    in_channels[i] * width), ksize=3, stride=1, act=act),
+            ]))
+            self.reg_preds.append(
+                nn.Conv2d(in_channels=int(
+                    in_channels[i] * width), out_channels=4, kernel_size=1, stride=1, padding=0)
+            )
+            self.obj_preds.append(
+                nn.Conv2d(in_channels=int(
+                    in_channels[i] * width), out_channels=1, kernel_size=1, stride=1, padding=0)
+            )
+
+    def forward(self, inputs):
+        outputs = []
+        for k, x in enumerate(inputs):
+            cls_feat = self.cls_convs[k](x)
+            cls_output = self.cls_preds[k](cls_feat)
+            reg_feat = self.reg_convs[k](x)
+            reg_output = self.reg_preds[k](reg_feat)
+            obj_output = self.obj_preds[k](reg_feat)
+            output = torch.cat([reg_output, obj_output, cls_output], 1)
+            outputs.append(output)
+
+        return outputs

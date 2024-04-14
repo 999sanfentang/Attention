@@ -66,3 +66,11 @@
 三者相加求avg
 
 感觉很水
+
+![image-20240412165053038](https://typoraa001.oss-cn-beijing.aliyuncs.com/image-20240412165053038.png)
+
+eca：不降维，不建立通道连接
+
+
+
+ca、TA：多维度交互（cwh交互）
